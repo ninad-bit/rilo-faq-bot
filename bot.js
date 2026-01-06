@@ -101,7 +101,7 @@ client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
   const isDM = !message.guild;
-  const isMentioned = message.mentions.has(client.user);
+  const isMentioned = message.mentions.has(client.user) && !message.mentions.everyone;
 
   if (!isDM && !isMentioned) return;
 
