@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits } = require('discord.js');
+const { Client, GatewayIntentBits, Partials } = require('discord.js');
 const OpenAI = require('openai');
 
 const client = new Client({
@@ -6,7 +6,9 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.DirectMessages,
   ],
+  partials: [Partials.Channel],
 });
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -21,7 +23,11 @@ client.on('ready', () => {
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
-  if (!message.mentions.has(client.user)) return;
+  const isDM = !message.guild;
+  const isMentioned = message.mentions.has(client.user);
+
+  // Respond to DMs or mentions
+  if (!isDM && !isMentioned) return;
 
   const question = message.content.replace(/<@!?\d+>/g, '').trim();
 
