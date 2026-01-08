@@ -15,8 +15,6 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const ASSISTANT_ID = process.env.ASSISTANT_ID;
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 
-const userThreads = new Map();
-
 // Register slash command on startup
 client.once('ready', async () => {
   console.log(`Bot is online as ${client.user.tag}`);
@@ -42,6 +40,37 @@ client.once('ready', async () => {
   }
 });
 
+// Helper function to get answer from OpenAI
+async function getAnswer(question) {
+  // Create fresh thread for each question
+  const thread = await openai.beta.threads.create();
+
+  await openai.beta.threads.messages.create(thread.id, {
+    role: 'user',
+    content: question,
+  });
+
+  const run = await openai.beta.threads.runs.create(thread.id, {
+    assistant_id: ASSISTANT_ID,
+  });
+
+  let runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+
+  while (runStatus.status !== 'completed') {
+    if (runStatus.status === 'failed') {
+      throw new Error('Assistant run failed');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+  }
+
+  const messages = await openai.beta.threads.messages.list(thread.id);
+  const response = messages.data[0].content[0].text.value;
+
+  // Clean up citations
+  return response.replace(/【\d+[:\d]*†source】/g, '').trim();
+}
+
 // Handle slash commands
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
@@ -49,46 +78,15 @@ client.on('interactionCreate', async (interaction) => {
 
   const question = interaction.options.getString('question');
 
-  // Defer reply as ephemeral (only visible to user)
   await interaction.deferReply({ ephemeral: true });
 
   try {
-    let threadId = userThreads.get(interaction.user.id);
+    const answer = await getAnswer(question);
 
-    if (!threadId) {
-      const thread = await openai.beta.threads.create();
-      threadId = thread.id;
-      userThreads.set(interaction.user.id, threadId);
-    }
-
-    await openai.beta.threads.messages.create(threadId, {
-      role: 'user',
-      content: question,
-    });
-
-    const run = await openai.beta.threads.runs.create(threadId, {
-      assistant_id: ASSISTANT_ID,
-    });
-
-    let runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id);
-
-    while (runStatus.status !== 'completed') {
-      if (runStatus.status === 'failed') {
-        throw new Error('Assistant run failed');
-      }
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id);
-    }
-
-    const messages = await openai.beta.threads.messages.list(threadId);
-    const response = messages.data[0].content[0].text.value;
-
-    const cleanResponse = response.replace(/【\d+[:\d]*†source】/g, '').trim();
-
-    if (cleanResponse.length > 1900) {
-      await interaction.editReply(cleanResponse.substring(0, 1900) + '...');
+    if (answer.length > 1900) {
+      await interaction.editReply(answer.substring(0, 1900) + '...');
     } else {
-      await interaction.editReply(cleanResponse);
+      await interaction.editReply(answer);
     }
   } catch (error) {
     console.error('Error:', error);
@@ -96,7 +94,7 @@ client.on('interactionCreate', async (interaction) => {
   }
 });
 
-// Also keep DM and mention support
+// Handle DMs and mentions
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
@@ -115,42 +113,12 @@ client.on('messageCreate', async (message) => {
   try {
     await message.channel.sendTyping();
 
-    let threadId = userThreads.get(message.author.id);
+    const answer = await getAnswer(question);
 
-    if (!threadId) {
-      const thread = await openai.beta.threads.create();
-      threadId = thread.id;
-      userThreads.set(message.author.id, threadId);
-    }
-
-    await openai.beta.threads.messages.create(threadId, {
-      role: 'user',
-      content: question,
-    });
-
-    const run = await openai.beta.threads.runs.create(threadId, {
-      assistant_id: ASSISTANT_ID,
-    });
-
-    let runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id);
-
-    while (runStatus.status !== 'completed') {
-      if (runStatus.status === 'failed') {
-        throw new Error('Assistant run failed');
-      }
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id);
-    }
-
-    const messages = await openai.beta.threads.messages.list(threadId);
-    const response = messages.data[0].content[0].text.value;
-
-    const cleanResponse = response.replace(/【\d+[:\d]*†source】/g, '').trim();
-
-    if (cleanResponse.length > 1900) {
-      message.reply(cleanResponse.substring(0, 1900) + '...');
+    if (answer.length > 1900) {
+      message.reply(answer.substring(0, 1900) + '...');
     } else {
-      message.reply(cleanResponse);
+      message.reply(answer);
     }
   } catch (error) {
     console.error('Error:', error);
