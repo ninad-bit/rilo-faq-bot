@@ -14,6 +14,7 @@ const client = new Client({
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const ASSISTANT_ID = process.env.ASSISTANT_ID;
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+const SHEET_URL = 'https://script.google.com/a/macros/getrilo.ai/s/AKfycbyq1NDqkTDWqjxprm55tFFxzMtm9ZDtGLHLmJlIvFA248N3RCgdglPG59wykKvculqZ3w/exec';
 
 // Register slash command on startup
 client.once('ready', async () => {
@@ -41,8 +42,9 @@ client.once('ready', async () => {
 });
 
 // Helper function to get answer from OpenAI
-async function getAnswer(question) {
-  // Create fresh thread for each question
+async function getAnswer(question, userId, username) {
+  console.log(`[Q] User: ${username} (${userId}) | Question: ${question}`);
+  
   const thread = await openai.beta.threads.create();
 
   await openai.beta.threads.messages.create(thread.id, {
@@ -67,8 +69,24 @@ async function getAnswer(question) {
   const messages = await openai.beta.threads.messages.list(thread.id);
   const response = messages.data[0].content[0].text.value;
 
-  // Clean up citations
-  return response.replace(/【\d+[:\d]*†source】/g, '').trim();
+  const cleanResponse = response.replace(/【\d+[:\d]*†source】/g, '').trim();
+  
+  console.log(`[A] User: ${username} | Answer: ${cleanResponse.substring(0, 200)}...`);
+
+  // Log to Google Sheet
+  fetch(SHEET_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      timestamp: new Date().toISOString(),
+      user: username,
+      userId: userId,
+      question: question,
+      answer: cleanResponse
+    })
+  }).catch(err => console.log('Sheet log failed:', err));
+
+  return cleanResponse;
 }
 
 // Handle slash commands
@@ -81,7 +99,7 @@ client.on('interactionCreate', async (interaction) => {
   await interaction.deferReply({ ephemeral: true });
 
   try {
-    const answer = await getAnswer(question);
+    const answer = await getAnswer(question, interaction.user.id, interaction.user.username);
 
     if (answer.length > 1900) {
       await interaction.editReply(answer.substring(0, 1900) + '...');
@@ -113,7 +131,7 @@ client.on('messageCreate', async (message) => {
   try {
     await message.channel.sendTyping();
 
-    const answer = await getAnswer(question);
+    const answer = await getAnswer(question, message.author.id, message.author.username);
 
     if (answer.length > 1900) {
       message.reply(answer.substring(0, 1900) + '...');
